@@ -1,0 +1,47 @@
+name: Build Openwrt
+on: [push, workflow_dispatch]
+
+env:
+  REPO_PATH: openwrt/openwrt
+  REPO_BRANCH: openwrt-21.02
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+
+    steps:
+
+    - name: Checkout Openwrt
+      uses: actions/checkout@v2
+      with:
+        repository: $REPO_PATH
+        ref: $REPO_BRANCH
+        fetch-depth: 1
+        persist-credentials: false
+#        submodules: recursive
+
+    - name: Checkout Config
+      uses: actions/checkout@v2
+      with:
+        fetch-depth: 1
+        persist-credentials: false
+
+    - name: Update Feeds
+      run: ./scripts/feeds update -a
+
+    - name: Install Feeds
+      run: ./scripts/feeds install -a
+
+    - name: Build Firmware
+      run: make defconfig
+
+    - name: Archive firmware
+      uses: actions/upload-artifact@v2
+      with:
+        name: openwrt_firmware
+        retention-days: 2
+        path: |
+          bin/targets/*/*.bin
+      continue-on-error: true
