@@ -1,47 +1,81 @@
 name: Build Openwrt
-on: [push, workflow_dispatch]
-
-env:
-  REPO_PATH: openwrt/openwrt
-  REPO_BRANCH: openwrt-21.02
+on:
+  schedule:
+  - cron: '0 20 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
+    name: Build Openwrt
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      matrix:
+        device:
+        - erx
+        - wrt1900ac
+        branch:
+        - 97b95ef8b9186518cda6f2d3cec8a01860fae2e7
+        - openwrt-21.02
+#        include:
+#        - device: e8450
+#          branch: 0dc4ab344bf52fce60128f0d710b88150ed47507
+#        - device: e8450
+#          branch: master
 
     steps:
+    - name: Generate Build Name
+      id: name
+      run: |
+        set -x
+        TARGET=${{ matrix.device }}_$(expr substr "${{ matrix.branch }}" 1 13)
+        echo "::set-output name=artifact-name::${TARGET}"
 
     - name: Checkout Openwrt
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
-        repository: $REPO_PATH
-        ref: $REPO_BRANCH
-        fetch-depth: 1
-        persist-credentials: false
-#        submodules: recursive
+        repository: openwrt/openwrt
+        ref: ${{ matrix.branch }}
+
+    - name: Configure Feeds
+      run: |
+        sed -i '/telephony.git/d' feeds.conf.default
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: Cache Build Files
+      uses: actions/cache@v3
+      with:
+        path: |
+          dl/
+          build_dir/
+          staging_dir/
+        key: ${{ runner.os }}-${{ matrix.device }}-${{ hashFiles('.git/HEAD') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ matrix.device }}-
 
     - name: Checkout Config
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
-        fetch-depth: 1
+        path: user
         persist-credentials: false
 
-    - name: Update Feeds
-      run: ./scripts/feeds update -a
-
-    - name: Install Feeds
-      run: ./scripts/feeds install -a
-
-    - name: Build Firmware
-      run: make defconfig
+    - name: Build ${{ matrix.device }} Firmware
+      continue-on-error: true
+      run: |
+        cp user/${{ matrix.device }}.config .config
+        make defconfig
+        make -j9 download
+        make -j3
 
     - name: Archive firmware
-      uses: actions/upload-artifact@v2
-      with:
-        name: openwrt_firmware
-        retention-days: 2
-        path: |
-          bin/targets/*/*.bin
+      uses: actions/upload-artifact@v3
       continue-on-error: true
+      with:
+        name: ${{ steps.name.outputs.artifact-name }}
+        path: bin/targets/*
+        retention-days: 30
+
+  purge:
+    uses: filterpaper/scripts/.github/workflows/delete-workflow.yml@main
+
